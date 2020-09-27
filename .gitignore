@@ -1,0 +1,5 @@
+# ignore build files
+/target
+
+# ignore backup files from cargo fmt
+**/*.rs.bk
