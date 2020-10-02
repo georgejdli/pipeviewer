@@ -1,77 +1,33 @@
-use clap::{App, Arg};
-use std::env;
-use std::fs::File;
-use std::io::{self, BufReader, BufWriter, ErrorKind, Read, Result, Write};
-
-// 16 byte size buffer
-const CHUNK_SIZE: usize = 16 * 1024;
+use pipeviewer::{args::Args, read, stats, write};
+use std::io::Result;
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 fn main() -> Result<()> {
-    let matches = App::new("pipeviewer")
-        .version("0.1")
-        .author("George Li <georgejdli@gmail.com")
-        .arg(Arg::with_name("infile").help("Read from a file instad of stdin"))
-        .arg(
-            Arg::with_name("outfile")
-                .short("o")
-                .long("outfile")
-                .takes_value(true)
-                .help("Write output to file instead of stdout"),
-        )
-        .arg(
-            Arg::with_name("silent")
-                .short("s")
-                .long("silent")
-                .help("Suppress total bytes read"),
-        )
-        .get_matches();
-    let infile = matches.value_of("infile").unwrap_or_default();
-    let outfile = matches.value_of("outfile").unwrap_or_default();
-    let silent = if matches.is_present("silent") {
-        true
-    } else {
-        !env::var("PV_SILENT").unwrap_or_default().is_empty()
-    };
+    let args = Args::parse();
+    let Args {
+        infile,
+        outfile,
+        silent,
+    } = args;
 
-    // replace stdin with reader
-    let mut reader: Box<dyn Read> = if !infile.is_empty() {
-        Box::new(BufReader::new(File::open(infile)?))
-    } else {
-        Box::new(BufReader::new(io::stdin()))
-    };
+    let quit = Arc::new(Mutex::new(false));
+    let (quit1, quit2, quit3) = (quit.clone(), quit.clone(), quit.clone());
 
-    let mut writer: Box<dyn Write> = if !outfile.is_empty() {
-        Box::new(BufWriter::new(File::create(outfile)?))
-    } else {
-        Box::new(BufWriter::new(io::stdout()))
-    };
+    let read_handle = thread::spawn(move || read::read_loop(&infile, quit1));
+    let stats_handle = thread::spawn(move || stats::stats_loop(silent, quit2));
+    let write_handle = thread::spawn(move || write::write_loop(&outfile, quit3));
 
-    let mut total_bytes = 0;
-    let mut buffer = [0; CHUNK_SIZE];
-    loop {
-        let num_read = match reader.read(&mut buffer) {
-            Ok(0) => break, //most specific match first, end of file, more more bytes to read
-            Ok(x) => x,
-            Err(_) => break,
-        };
-        total_bytes += num_read;
-        if !silent {
-            // return to start of the line to it overwrites prevous output, to show progress cleanly
-            // not using new "ln"
-            eprint!("\r{}", total_bytes);
-        }
+    // crash if any threads have crashed
+    // `.join()` returns a `thread:Result<io:Result<()>>`
+    let read_io_result = read_handle.join().unwrap();
+    let stats_to_result = stats_handle.join().unwrap();
+    let write_io_result = write_handle.join().unwrap();
 
-        if let Err(e) = writer.write_all(&buffer[..num_read]) {
-            if e.kind() == ErrorKind::BrokenPipe {
-                break;
-            }
-            return Err(e);
-            // eprintln!("Oh no, an error! {}", e.to_string());
-            // std::process::exit(1)
-        }
-    }
-    if !silent {
-        eprintln!("\r{}", total_bytes);
-    }
+    // Return an error if any threads returned an error
+    read_io_result?;
+    stats_to_result?;
+    write_io_result?;
+
     Ok(())
 }
