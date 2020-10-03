@@ -1,5 +1,5 @@
 //! The stats module contains the stats loop
-//! 
+//!
 //! # Some header
 //! More discussion!
 
@@ -64,10 +64,10 @@ fn output_progress(stderr: &mut Stderr, bytes: usize, elapsed: String, rate: f64
 }
 
 /// The TimeOutput trait adds a `.as_time()` method to `u64`
-/// 
+///
 /// # Example
 /// Here is an example of how to use it
-/// 
+///
 /// ```rust
 /// use pipeviewer::stats::TimeOutput;
 /// assert_eq!(65_u64.as_time(), String::from("0:01:05"))
